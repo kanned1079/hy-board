@@ -1,0 +1,34 @@
+server:
+  port: 8080
+  mode: "debug" # debug | release
+
+database:
+  # Supported types: sqlite | mysql | postgres
+  type: "sqlite"
+  
+  # SQLite specific configuration
+  sqlite:
+    file: "hy-board.db"
+
+  # MySQL specific configuration
+  mysql:
+    host: "127.0.0.1"
+    port: 3306
+    user: "root"
+    password: "password"
+    db_name: "hy_board"
+    charset: "utf8mb4"
+
+  # PostgreSQL specific configuration
+  postgres:
+    host: "127.0.0.1"
+    port: 5432
+    user: "postgres"
+    password: "password"
+    db_name: "hy_board"
+    ssl_mode: "disable"
+
+auth:
+  jwt_secret: "super-secret-jwt-key"
+  jwt_expire_hours: 24
+  uniproxy_token: "secret-uniproxy-token"

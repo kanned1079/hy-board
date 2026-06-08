@@ -1,0 +1,16 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+@theme static {
+  --color-brand-50: #f4f7fa;
+  --color-brand-100: #e5edf4;
+  --color-brand-200: #cfdee9;
+  --color-brand-300: #a9c6da;
+  --color-brand-400: #7ca3c5;
+  --color-brand-500: #4f7da6;
+  --color-brand-600: #3e6388;
+  --color-brand-700: #334e6e;
+  --color-brand-800: #2c425c;
+  --color-brand-900: #28394e;
+  --color-brand-950: #1a2433;
+}

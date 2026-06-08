@@ -1,0 +1,75 @@
+package database
+
+import (
+	"fmt"
+	"log"
+
+	"hy-board-backend/config"
+	"hy-board-backend/models"
+
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+)
+
+var DB *gorm.DB
+
+func InitDB() *gorm.DB {
+	var err error
+	cfg := config.GlobalConfig.Database
+
+	switch cfg.Type {
+	case "sqlite":
+		DB, err = gorm.Open(sqlite.Open(cfg.Sqlite.File), &gorm.Config{})
+	case "mysql":
+		dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
+			cfg.Mysql.User,
+			cfg.Mysql.Password,
+			cfg.Mysql.Host,
+			cfg.Mysql.Port,
+			cfg.Mysql.DBName,
+			cfg.Mysql.Charset,
+		)
+		DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	case "postgres":
+		dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d sslmode=%s TimeZone=Asia/Shanghai",
+			cfg.Postgres.Host,
+			cfg.Postgres.User,
+			cfg.Postgres.Password,
+			cfg.Postgres.DBName,
+			cfg.Postgres.Port,
+			cfg.Postgres.SSLMode,
+		)
+		DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	default:
+		log.Fatalf("Unsupported database type: %s", cfg.Type)
+	}
+
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+
+	log.Println("Database connection established successfully.")
+	return DB
+}
+
+func Migrate() {
+	if DB == nil {
+		log.Fatal("Database not initialized. Cannot migrate.")
+	}
+
+	err := DB.AutoMigrate(
+		&models.User{},
+		&models.Node{},
+		&models.TrafficLog{},
+		&models.Announcement{},
+		&models.Knowledge{},
+		&models.Ticket{},
+		&models.TicketMessage{},
+	)
+	if err != nil {
+		log.Fatalf("Database migration failed: %v", err)
+	}
+	log.Println("Database schema auto-migrated successfully.")
+}

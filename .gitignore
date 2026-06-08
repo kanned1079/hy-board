@@ -1,0 +1,24 @@
+# OS / Editor Files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*.tmp
+
+# Go Backend Artifacts
+backend/hy-board-backend
+backend/*.exe
+backend/*.test
+backend/*.out
+backend/hy-board.db
+
+# Nuxt 4 Frontend Artifacts
+frontend/node_modules/
+frontend/.nuxt/
+frontend/.output/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+frontend/.turbo/
