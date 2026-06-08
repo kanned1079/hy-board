@@ -67,9 +67,52 @@ func Migrate() {
 		&models.Knowledge{},
 		&models.Ticket{},
 		&models.TicketMessage{},
+		&models.Group{},
+		&models.Plan{},
 	)
 	if err != nil {
 		log.Fatalf("Database migration failed: %v", err)
 	}
 	log.Println("Database schema auto-migrated successfully.")
+
+	// Auto-seed default permission groups if none exist
+	var count int64
+	DB.Model(&models.Group{}).Count(&count)
+	if count == 0 {
+		DB.Create(&models.Group{ID: 1, Name: "S1 亞太標準訂閱", Description: "提供亞太地區標準節點，限速 150Mbps"})
+		DB.Create(&models.Group{ID: 2, Name: "S2 全球至尊訂閱", Description: "提供全球（亞太+美洲）節點，限速 300Mbps"})
+		DB.Create(&models.Group{ID: 99, Name: "Admin 系統管理組", Description: "系統管理與內部測試用權限組"})
+		log.Println("Default permission groups seeded successfully.")
+	}
+
+	// Auto-seed default plans if none exist
+	var planCount int64
+	DB.Model(&models.Plan{}).Count(&planCount)
+	if planCount == 0 {
+		DB.Create(&models.Plan{
+			ID:          1,
+			Name:        "S1 亞太標準版",
+			Description: "適合日常網頁瀏覽、社交媒體與普通通訊",
+			Price:       5.99,
+			Traffic:     150,
+			SpeedLimit:  150,
+			DeviceLimit: 3,
+			ExpiryDays:  30,
+			GroupID:     1,
+			Show:        true,
+		})
+		DB.Create(&models.Plan{
+			ID:          2,
+			Name:        "S2 全球至尊版",
+			Description: "適合影音串流、跨國遊戲與極速傳輸需求",
+			Price:       11.99,
+			Traffic:     400,
+			SpeedLimit:  300,
+			DeviceLimit: 5,
+			ExpiryDays:  30,
+			GroupID:     2,
+			Show:        true,
+		})
+		log.Println("Default subscription plans seeded successfully.")
+	}
 }

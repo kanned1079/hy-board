@@ -1,0 +1,15 @@
+api:
+  host: "http://localhost:8080"
+  key: "secret-uniproxy-token"
+  node_id: 1
+  interval: 15
+
+xray:
+  path: "" # Leave empty to auto-detect from tools/xray/xray
+  dir: ""  # Leave empty to auto-detect from tools/xray/
+
+dns:
+  servers:
+    - "1.1.1.1"
+    - "8.8.8.8"
+    - "localhost"

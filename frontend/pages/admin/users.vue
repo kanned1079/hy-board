@@ -43,6 +43,7 @@
               <th class="py-2 px-3">{{ t('balance') }}</th>
               <th class="py-2 px-3">{{ t('traffic_usage') }}</th>
               <th class="py-2 px-3">{{ t('limitations') }}</th>
+              <th class="py-2 px-3">訂閱等級</th>
               <th class="py-2 px-3">{{ t('plan_expiration') }}</th>
               <th class="py-2 px-3 w-20 text-center">{{ t('status') }}</th>
               <th class="py-2 px-3 w-28 text-right"></th>
@@ -75,6 +76,12 @@
                   <div>Speed: <span class="font-mono font-semibold text-slate-700 dark:text-zinc-300">{{ usr.speed_limit ? `${usr.speed_limit} Mbps` : t('unlimited') }}</span></div>
                   <div>Devices: <span class="font-mono font-semibold text-slate-700 dark:text-zinc-300">{{ usr.device_limit ? `${usr.device_limit}` : t('unlimited') }}</span></div>
                 </div>
+              </td>
+              <td class="py-3 px-3">
+                <UBadge v-if="usr.is_admin || usr.group_id === 99" color="success" variant="subtle" size="xs">Admin</UBadge>
+                <UBadge v-else color="primary" variant="subtle" size="xs">
+                  {{ getGroupName(usr.group_id) }}
+                </UBadge>
               </td>
               <td class="py-3 px-3 font-mono text-slate-500">{{ usr.expired_at ? formatDate(usr.expired_at) : t('lifetime') }}</td>
               <td class="py-3 px-3 text-center">
@@ -162,6 +169,16 @@
               </UFormField>
             </div>
 
+            <div class="grid grid-cols-1 gap-4">
+              <UFormField label="訂閱等級 (Subscription Group)" name="group_id">
+                <select v-model.number="editingUser.group_id" class="w-full bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-md py-1.5 px-2.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary-500 text-slate-700 dark:text-zinc-300">
+                  <option v-for="g in groups" :key="g.id" :value="g.id">
+                    {{ g.name }} (Group {{ g.id }})
+                  </option>
+                </select>
+              </UFormField>
+            </div>
+
             <div class="flex space-x-6 items-center pt-2">
               <div class="flex items-center space-x-2">
                 <span class="text-xs text-slate-500 dark:text-zinc-400">Is Admin</span>
@@ -196,6 +213,12 @@ const router = useRouter()
 const config = useRuntimeConfig()
 
 const users = ref([])
+const groups = ref([])
+
+const getGroupName = (groupId) => {
+  const g = groups.value.find(item => item.id === groupId)
+  return g ? g.name : `GroupID: ${groupId}`
+}
 const loading = ref(true)
 const searchQuery = ref('')
 const isEditModalOpen = ref(false)
@@ -212,7 +235,18 @@ const editingUser = ref({
   used_traffic_gb: 0,
   expired_at_str: '',
   is_admin: false,
-  status_active: true
+  status_active: true,
+  group_id: 1
+})
+
+watch(() => editingUser.value.group_id, (newVal) => {
+  if (newVal === 1) {
+    editingUser.value.speed_limit = 150
+  } else if (newVal === 2) {
+    editingUser.value.speed_limit = 300
+  } else if (newVal === 99) {
+    editingUser.value.speed_limit = 0
+  }
 })
 
 useSeoMeta({
@@ -264,6 +298,11 @@ const fetchUsers = async () => {
               status
               is_admin
               balance
+              group_id
+            }
+            groups {
+              id
+              name
             }
           }
         `
@@ -275,6 +314,7 @@ const fetchUsers = async () => {
     }
 
     users.value = response.data?.adminUsers || []
+    groups.value = response.data?.groups || []
   } catch (error) {
     toast.add({
       id: 'session_expired',
@@ -304,7 +344,8 @@ const openEditModal = (user) => {
     used_traffic_gb: parseFloat((user.used_traffic / (1024 * 1024 * 1024)).toFixed(2)),
     expired_at_str: formatDate(user.expired_at),
     is_admin: user.is_admin,
-    status_active: user.status === 1
+    status_active: user.status === 1,
+    group_id: user.group_id || 1
   }
   isEditModalOpen.value = true
 }
@@ -379,7 +420,8 @@ const updateUser = async () => {
             $used_traffic: Float!, 
             $expired_at: String!, 
             $status: Int!, 
-            $is_admin: Boolean!
+            $is_admin: Boolean!,
+            $group_id: Int
           ) {
             updateUser(
               id: $id, 
@@ -392,7 +434,8 @@ const updateUser = async () => {
               used_traffic: $used_traffic, 
               expired_at: $expired_at, 
               status: $status, 
-              is_admin: $is_admin
+              is_admin: $is_admin,
+              group_id: $group_id
             ) {
               id
             }
@@ -409,7 +452,8 @@ const updateUser = async () => {
           used_traffic: usedTrafficBytes,
           expired_at: expiredAtIso,
           status: editingUser.value.status_active ? 1 : 0,
-          is_admin: editingUser.value.is_admin
+          is_admin: editingUser.value.is_admin,
+          group_id: editingUser.value.group_id
         }
       }
     })

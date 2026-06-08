@@ -59,10 +59,21 @@
 
       <!-- Nodes Section -->
       <section class="backdrop-blur-md bg-white/70 dark:bg-zinc-900/40 border border-slate-200 dark:border-zinc-800/80 p-4 rounded-lg space-y-4 shadow-sm">
-        <h2 class="text-md font-bold text-slate-900 dark:text-white flex items-center space-x-2">
-          <UIcon name="i-lucide-server" class="w-4 h-4 text-primary-500 dark:text-primary-400" />
-          <span>{{ t('active_nodes') }} ({{ nodes.length }})</span>
-        </h2>
+        <div class="flex justify-between items-center">
+          <h2 class="text-md font-bold text-slate-900 dark:text-white flex items-center space-x-2">
+            <UIcon name="i-lucide-server" class="w-4 h-4 text-primary-500 dark:text-primary-400" />
+            <span>{{ t('active_nodes') }} ({{ nodes.length }})</span>
+          </h2>
+          <UButton
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            icon="i-lucide-arrow-right"
+            :to="localePath('/admin/servers/nodes')"
+          >
+            管理節點
+          </UButton>
+        </div>
 
         <div v-if="loading" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <USkeleton class="h-24 w-full rounded-lg bg-slate-200 dark:bg-zinc-900/40" v-for="i in 3" :key="i" />
@@ -75,69 +86,40 @@
                 <p class="font-bold text-slate-900 dark:text-white text-md">{{ node.name }}</p>
                 <p class="text-[11px] text-slate-500 font-mono mt-0.5">{{ node.address }}:{{ node.port }}</p>
               </div>
-              <UBadge color="primary" variant="subtle" size="xs">{{ node.type }}</UBadge>
+              <div class="flex items-center space-x-1.5">
+                <UBadge color="primary" variant="subtle" size="xs">{{ node.type }}</UBadge>
+                <div class="flex flex-wrap gap-0.5 justify-end">
+                  <span v-if="!node.group_ids || node.group_ids.trim() === ''" class="text-slate-400 text-[10px]">-</span>
+                  <UBadge
+                    v-else
+                    v-for="gId in (node.group_ids || '').split(',').map(s => s.trim()).filter(Boolean)"
+                    :key="gId"
+                    color="sky"
+                    variant="soft"
+                    size="xs"
+                  >
+                    {{ getGroupName(parseInt(gId)) }}
+                  </UBadge>
+                </div>
+              </div>
             </div>
-            
-            <div class="text-[11px] text-slate-500 dark:text-zinc-400 flex justify-between">
+                 <div class="text-[11px] text-slate-500 dark:text-zinc-400 flex justify-between items-center">
               <span>{{ t('traffic_rate') }}: <strong class="text-slate-700 dark:text-white">{{ node.traffic_rate }}x</strong></span>
-              <span>{{ t('status') }}: <strong class="text-emerald-500 dark:text-emerald-400">{{ t('online') }}</strong></span>
+              <div class="flex items-center">
+                <span
+                  class="w-2.5 h-2.5 rounded-full inline-block"
+                  :class="{
+                    'bg-rose-500': node.status === 'offline',
+                    'bg-amber-500': node.status === 'idle',
+                    'bg-emerald-500 animate-pulse': node.status === 'active'
+                  }"
+                  :title="node.status === 'active' ? '活躍 (有人連結)' : (node.status === 'idle' ? '閒置 (正常連線)' : '離線 (無法連線)')"
+                ></span>
+              </div>
             </div>
           </div>
         </div>
       </section>
-
-      <!-- Add Node Modal -->
-      <UModal v-model:open="isNodeModalOpen">
-        <div class="p-4 space-y-4 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg">
-          <div class="flex justify-between items-center">
-            <h3 class="text-md font-bold text-slate-900 dark:text-white">{{ t('create_new_node') }}</h3>
-            <UButton
-              color="neutral"
-              variant="ghost"
-              icon="i-lucide-x"
-              @click="isNodeModalOpen = false"
-            />
-          </div>
-
-          <form @submit.prevent="createNode" class="space-y-3">
-            <UFormField :label="t('node_name')" name="name" class="text-slate-700 dark:text-zinc-300">
-              <UInput v-model="newNode.name" placeholder="SG-01 Vless Premium" color="primary" size="sm" class="w-full" required />
-            </UFormField>
-
-            <UFormField :label="t('protocol_type')" name="type" class="text-slate-700 dark:text-zinc-300">
-              <USelect
-                v-model="newNode.type"
-                :items="['V2ray', 'Vless', 'Trojan']"
-                color="primary"
-                size="sm"
-                class="w-full"
-              />
-            </UFormField>
-
-            <div class="grid grid-cols-3 gap-3">
-              <UFormField :label="t('address')" name="address" class="text-slate-700 dark:text-zinc-300 col-span-2">
-                <UInput v-model="newNode.address" placeholder="sg1.example.com" color="primary" size="sm" class="w-full" required />
-              </UFormField>
-              <UFormField :label="t('port')" name="port" class="text-slate-700 dark:text-zinc-300">
-                <UInput v-model.number="newNode.port" type="number" placeholder="443" color="primary" size="sm" class="w-full" required />
-              </UFormField>
-            </div>
-
-            <UFormField :label="t('traffic_rate')" name="traffic_rate" class="text-slate-700 dark:text-zinc-300">
-              <UInput v-model.number="newNode.traffic_rate" type="number" step="0.1" placeholder="1.0" color="primary" size="sm" class="w-full" required />
-            </UFormField>
-
-            <UFormField :label="t('transport_settings')" name="settings" class="text-slate-700 dark:text-zinc-300">
-              <UTextarea v-model="newNode.settings" placeholder='{"transport": "ws", "path": "/v2ray"}' color="primary" size="sm" rows="3" class="w-full" />
-            </UFormField>
-
-            <div class="pt-2 flex justify-end gap-2">
-              <UButton color="neutral" variant="ghost" size="sm" @click="isNodeModalOpen = false">{{ t('cancel') }}</UButton>
-              <UButton type="submit" color="primary" size="sm" :loading="modalLoading">{{ t('create_node') }}</UButton>
-            </div>
-          </form>
-        </div>
-      </UModal>
 
       <!-- Add Announcement Modal -->
       <UModal v-model:open="isAnnouncementModalOpen">
@@ -182,9 +164,13 @@ const localePath = useLocalePath()
 
 const users = ref([])
 const nodes = ref([])
+const groups = ref([])
 const loading = ref(true)
-const modalLoading = ref(false)
-const isNodeModalOpen = ref(false)
+
+const getGroupName = (groupId) => {
+  const g = groups.value.find(item => item.id === groupId)
+  return g ? g.name : `Group ${groupId}`
+}
 
 const isAnnouncementModalOpen = ref(false)
 const announcementLoading = ref(false)
@@ -201,14 +187,6 @@ useSeoMeta({
   title: () => `${t('admin_panel')} - HY-Board`
 })
 
-const newNode = ref({
-  name: '',
-  type: 'Vless',
-  address: '',
-  port: 443,
-  traffic_rate: 1.0,
-  settings: '{"transport": "ws", "path": "/vless"}'
-})
 
 const fetchData = async () => {
   const token = useCookie('auth_token').value
@@ -239,6 +217,13 @@ const fetchData = async () => {
               address
               port
               traffic_rate
+              group_id
+              group_ids
+              status
+            }
+            groups {
+              id
+              name
             }
           }
         `
@@ -251,6 +236,7 @@ const fetchData = async () => {
 
     users.value = response.data.adminUsers
     nodes.value = response.data.nodes
+    groups.value = response.data.groups || []
   } catch (error) {
     toast.add({
       id: 'session_expired',
@@ -268,68 +254,7 @@ onMounted(() => {
   fetchData()
 })
 
-const createNode = async () => {
-  modalLoading.value = true
-  const token = useCookie('auth_token').value
-  try {
-    const response = await $fetch(`${config.public.apiBase}/graphql`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: {
-        query: `
-          mutation CreateNode($name: String!, $type: String!, $address: String!, $port: Int!, $traffic_rate: Float!, $settings: String) {
-            createNode(name: $name, type: $type, address: $address, port: $port, traffic_rate: $traffic_rate, settings: $settings) {
-              id
-              name
-            }
-          }
-        `,
-        variables: {
-          name: newNode.value.name,
-          type: newNode.value.type,
-          address: newNode.value.address,
-          port: newNode.value.port,
-          traffic_rate: newNode.value.traffic_rate,
-          settings: newNode.value.settings
-        }
-      }
-    })
 
-    if (response.errors && response.errors.length > 0) {
-      throw new Error(response.errors[0].message)
-    }
-
-    toast.add({
-      id: 'node_created',
-      title: t('node_created'),
-      description: t('node_created_desc').replace('{name}', newNode.value.name),
-      color: 'success'
-    })
-
-    isNodeModalOpen.value = false
-    // Reset form
-    newNode.value = {
-      name: '',
-      type: 'Vless',
-      address: '',
-      port: 443,
-      traffic_rate: 1.0,
-      settings: '{"transport": "ws", "path": "/vless"}'
-    }
-
-    // Refresh nodes
-    await fetchData()
-  } catch (error) {
-    toast.add({
-      id: 'node_creation_failed',
-      title: t('node_failed'),
-      description: error.message || 'Node creation failed',
-      color: 'error'
-    })
-  } finally {
-    modalLoading.value = false
-  }
-}
 
 const createAnnouncement = async () => {
   announcementLoading.value = true

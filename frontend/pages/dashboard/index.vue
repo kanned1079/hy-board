@@ -43,13 +43,29 @@
 
       <!-- Traffic Card -->
       <div class="backdrop-blur-md bg-white/70 dark:bg-zinc-900/40 border border-slate-200 dark:border-zinc-800/80 p-4 rounded-lg space-y-3 shadow-sm">
-        <h3 class="text-[10px] font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">{{ t('traffic_usage') }}</h3>
+        <div class="flex items-center justify-between">
+          <h3 class="text-[10px] font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">{{ t('traffic_usage') }}</h3>
+          <div class="flex items-center gap-1.5">
+            <span class="text-[9px] text-slate-400 dark:text-zinc-500 font-mono tabular-nums">{{ refreshCountdown }}s</span>
+            <UIcon
+              name="i-lucide-refresh-cw"
+              :class="['w-3 h-3 text-slate-400 dark:text-zinc-500 cursor-pointer hover:text-primary-500 transition-colors', { 'animate-spin text-primary-500': trafficRefreshing }]"
+              @click="refreshTraffic"
+            />
+          </div>
+        </div>
         <div class="flex items-baseline space-x-1.5">
-          <span class="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white">{{ formatTraffic(user?.used_traffic) }}</span>
+          <span :class="['text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white transition-opacity duration-300', { 'opacity-50': trafficRefreshing }]">{{ formatTraffic(user?.used_traffic) }}</span>
           <span class="text-[10px] text-slate-500">/ {{ formatTraffic(user?.total_traffic) }}</span>
         </div>
-        <!-- Progress bar using Nuxt UI -->
-        <UProgress :value="trafficPercent" color="primary" size="xs" />
+        <!-- Countdown thin bar at bottom of card -->
+        <div class="relative">
+          <UProgress :value="trafficPercent" color="primary" size="xs" />
+          <div
+            class="absolute bottom-0 left-0 h-[2px] bg-primary-400/30 dark:bg-primary-500/20 rounded-full transition-all duration-1000"
+            :style="{ width: ((30 - refreshCountdown) / 30 * 100) + '%' }"
+          />
+        </div>
       </div>
 
       <!-- Expiration Card -->
@@ -150,6 +166,11 @@ const nodes = ref([])
 const announcements = ref([])
 const loading = ref(true)
 const isOpen = ref(false)
+const trafficRefreshing = ref(false)
+const refreshCountdown = ref(30)
+
+let refreshTimer = null
+let countdownTimer = null
 
 const toast = useToast()
 const router = useRouter()
@@ -159,8 +180,8 @@ useSeoMeta({
   title: () => `${t('dashboard')} - HY-Board`
 })
 
-// Fetch User and Node info
-onMounted(async () => {
+// Fetch full dashboard data (initial load)
+async function fetchDashboard() {
   const token = useCookie('auth_token').value
   if (!token) {
     router.push(localePath('/login'))
@@ -222,6 +243,63 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+}
+
+// Lightweight traffic-only refresh (runs every 30 s)
+async function refreshTraffic() {
+  const token = useCookie('auth_token').value
+  if (!token) return
+
+  trafficRefreshing.value = true
+  try {
+    const response = await $fetch(`${config.public.apiBase}/graphql`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: {
+        query: `
+          query RefreshTraffic {
+            userInfo {
+              used_traffic
+              total_traffic
+              balance
+            }
+          }
+        `
+      }
+    })
+
+    if (!response.errors && response.data?.userInfo) {
+      user.value = { ...user.value, ...response.data.userInfo }
+    }
+  } catch {
+    // silently ignore refresh errors
+  } finally {
+    trafficRefreshing.value = false
+    // reset countdown
+    refreshCountdown.value = 30
+  }
+}
+
+function startRefreshCycle() {
+  // Tick the countdown every second
+  countdownTimer = setInterval(() => {
+    if (refreshCountdown.value <= 1) {
+      refreshCountdown.value = 30
+      refreshTraffic()
+    } else {
+      refreshCountdown.value--
+    }
+  }, 1000)
+}
+
+onMounted(async () => {
+  await fetchDashboard()
+  startRefreshCycle()
+})
+
+onUnmounted(() => {
+  clearInterval(refreshTimer)
+  clearInterval(countdownTimer)
 })
 
 const subUrl = computed(() => {

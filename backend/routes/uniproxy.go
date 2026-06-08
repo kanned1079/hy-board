@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"hy-board-backend/database"
@@ -39,6 +40,9 @@ func GetNodeConfig(c *gin.Context) {
 		return
 	}
 
+	// Update node's updated_at timestamp to register a heartbeat
+	database.DB.Model(&node).Update("updated_at", time.Now())
+
 	// Deserialize settings JSON
 	var settingsMap map[string]interface{}
 	if node.Settings != "" {
@@ -59,9 +63,33 @@ func GetNodeConfig(c *gin.Context) {
 
 // GetNodeUsers handles GET /api/v1/server/UniProxy/user
 func GetNodeUsers(c *gin.Context) {
+	nodeIDStr := c.Query("node_id")
+
 	var users []models.User
-	// Fetch active users who are not expired
-	err := database.DB.Where("status = ? AND (expired_at IS NULL OR expired_at > ?)", 1, time.Now()).Find(&users).Error
+	query := database.DB.Where("status = ? AND (expired_at IS NULL OR expired_at > ?)", 1, time.Now())
+
+	if nodeIDStr != "" {
+		if nodeID, err := strconv.ParseUint(nodeIDStr, 10, 32); err == nil {
+			var node models.Node
+			if err := database.DB.First(&node, uint(nodeID)).Error; err == nil {
+				// Parse allowed group IDs
+				parts := strings.Split(node.GroupIDs, ",")
+				var allowedGroupIDs []uint
+				for _, p := range parts {
+					if id, err := strconv.Atoi(strings.TrimSpace(p)); err == nil {
+						allowedGroupIDs = append(allowedGroupIDs, uint(id))
+					}
+				}
+				if len(allowedGroupIDs) > 0 {
+					query = query.Where("group_id IN ?", allowedGroupIDs)
+				} else {
+					query = query.Where("group_id = ?", node.GroupID)
+				}
+			}
+		}
+	}
+
+	err := query.Find(&users).Error
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
 		return

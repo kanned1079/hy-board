@@ -20,9 +20,10 @@ type User struct {
 	TotalTraffic   uint64         `gorm:"default:0" json:"total_traffic"` // Bytes
 	UsedTraffic    uint64         `gorm:"default:0" json:"used_traffic"`  // Bytes
 	ExpiredAt      time.Time      `json:"expired_at"`
-	Status         int8           `gorm:"default:1" json:"status"`   // 1 = Active, 0 = Disabled
+	Status         int8           `gorm:"default:1" json:"status"` // 1 = Active, 0 = Disabled
 	IsAdmin        bool           `gorm:"default:false" json:"is_admin"`
 	Balance        float64        `gorm:"default:0.0" json:"balance"`
+	GroupID        uint           `gorm:"default:1" json:"group_id"` // Subscription Level (1 = S1, 2 = S2, 99 = Admin)
 }
 
 type Node struct {
@@ -37,6 +38,8 @@ type Node struct {
 	TrafficRate float32        `gorm:"default:1.0" json:"traffic_rate"`
 	Settings    string         `gorm:"type:text" json:"settings"` // JSON string config
 	Show        bool           `gorm:"default:true" json:"show"`
+	GroupID     uint           `gorm:"default:1" json:"group_id"`                      // Deprecated in favor of GroupIDs
+	GroupIDs    string         `gorm:"type:varchar(255);default:'1'" json:"group_ids"` // Comma-separated group IDs required (e.g. "1,2")
 }
 
 type TrafficLog struct {
@@ -70,14 +73,14 @@ type Knowledge struct {
 }
 
 type Ticket struct {
-	ID        uint           `gorm:"primaryKey" json:"id"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
-	UserID    uint           `gorm:"index" json:"user_id"`
-	User      User           `gorm:"foreignKey:UserID" json:"user"`
-	Title     string         `gorm:"not null;size:255" json:"title"`
-	Status    string         `gorm:"default:'open';size:20" json:"status"` // open, closed
+	ID        uint            `gorm:"primaryKey" json:"id"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+	DeletedAt gorm.DeletedAt  `gorm:"index" json:"-"`
+	UserID    uint            `gorm:"index" json:"user_id"`
+	User      User            `gorm:"foreignKey:UserID" json:"user"`
+	Title     string          `gorm:"not null;size:255" json:"title"`
+	Status    string          `gorm:"default:'open';size:20" json:"status"` // open, closed
 	Messages  []TicketMessage `gorm:"foreignKey:TicketID;constraint:OnDelete:CASCADE" json:"messages"`
 }
 
@@ -89,4 +92,29 @@ type TicketMessage struct {
 	User      User      `gorm:"foreignKey:UserID" json:"user"`
 	Message   string    `gorm:"type:text;not null" json:"message"`
 	IsAdmin   bool      `gorm:"default:false" json:"is_admin"`
+}
+
+type Group struct {
+	ID          uint           `gorm:"primaryKey" json:"id"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
+	Name        string         `gorm:"not null;size:100" json:"name"`
+	Description string         `gorm:"size:255" json:"description"`
+}
+
+type Plan struct {
+	ID          uint           `gorm:"primaryKey" json:"id"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
+	Name        string         `gorm:"not null;size:100" json:"name"`
+	Description string         `gorm:"size:255" json:"description"`
+	Price       float64        `gorm:"not null;default:0.0" json:"price"`
+	Traffic     uint64         `gorm:"not null;default:0" json:"traffic"`      // Total traffic in GB
+	SpeedLimit  uint32         `gorm:"not null;default:0" json:"speed_limit"`  // Mbps (0 = unlimited)
+	DeviceLimit uint32         `gorm:"not null;default:0" json:"device_limit"` // Max devices (0 = unlimited)
+	ExpiryDays  uint32         `gorm:"not null;default:30" json:"expiry_days"` // Duration of subscription plan
+	GroupID     uint           `gorm:"not null;default:1" json:"group_id"`     // Maps to subscription level Group ID
+	Show        bool           `gorm:"default:true" json:"show"`
 }

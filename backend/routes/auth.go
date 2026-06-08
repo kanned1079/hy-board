@@ -2,14 +2,32 @@ package routes
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"hy-board-backend/database"
 	"hy-board-backend/models"
 
 	"github.com/gin-gonic/gin"
 )
+
+// Helper to check if a user group is in the allowed node groups list
+func isUserInNodeGroups(userGroupId uint, nodeGroupIdsStr string) bool {
+	if nodeGroupIdsStr == "" {
+		return false
+	}
+	parts := strings.Split(nodeGroupIdsStr, ",")
+	target := strconv.Itoa(int(userGroupId))
+	for _, part := range parts {
+		if strings.TrimSpace(part) == target {
+			return true
+		}
+	}
+	return false
+}
 
 // Subscribe handles subscription links: GET /api/v1/client/subscribe
 func Subscribe(c *gin.Context) {
@@ -26,8 +44,15 @@ func Subscribe(c *gin.Context) {
 		return
 	}
 
+	var allNodes []models.Node
+	database.DB.Where("show = ?", true).Find(&allNodes)
+
 	var nodes []models.Node
-	database.DB.Where("show = ?", true).Find(&nodes)
+	for _, node := range allNodes {
+		if isUserInNodeGroups(user.GroupID, node.GroupIDs) {
+			nodes = append(nodes, node)
+		}
+	}
 
 	var subContent string
 	for _, node := range nodes {
@@ -45,6 +70,21 @@ func Subscribe(c *gin.Context) {
 		case "Trojan":
 			subContent += fmt.Sprintf("trojan://%s@%s:%d#%s\n",
 				user.TrojanPassword, node.Address, node.Port, node.Name)
+		case "Shadowsocks":
+			// ss://method:password@hostname:port#tag
+			method := "aes-256-gcm"
+			if node.Settings != "" {
+				var settingsMap map[string]interface{}
+				if err := json.Unmarshal([]byte(node.Settings), &settingsMap); err == nil {
+					if m, ok := settingsMap["method"].(string); ok && m != "" {
+						method = m
+					}
+				}
+			}
+			ssUserInfo := fmt.Sprintf("%s:%s", method, user.TrojanPassword)
+			encodedUserInfo := base64.RawURLEncoding.EncodeToString([]byte(ssUserInfo))
+			subContent += fmt.Sprintf("ss://%s@%s:%d#%s\n",
+				encodedUserInfo, node.Address, node.Port, node.Name)
 		}
 	}
 
