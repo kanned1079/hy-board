@@ -106,6 +106,7 @@ var mutationType = graphql.NewObject(graphql.ObjectConfig{
 				"settings":     &graphql.ArgumentConfig{Type: graphql.String},
 				"group_id":     &graphql.ArgumentConfig{Type: graphql.Int},
 				"group_ids":    &graphql.ArgumentConfig{Type: graphql.String},
+				"show":         &graphql.ArgumentConfig{Type: graphql.Boolean},
 			},
 			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 				c, ok := p.Context.(*gin.Context)
@@ -138,6 +139,11 @@ var mutationType = graphql.NewObject(graphql.ObjectConfig{
 					groupIDsStr = val.(string)
 				}
 
+				show := true
+				if val, ok := p.Args["show"]; ok {
+					show = val.(bool)
+				}
+
 				node := models.Node{
 					Name:        name,
 					Type:        nodeProto,
@@ -145,7 +151,7 @@ var mutationType = graphql.NewObject(graphql.ObjectConfig{
 					Port:        uint16(port),
 					TrafficRate: float32(trafficRate),
 					Settings:    settings,
-					Show:        true,
+					Show:        show,
 					GroupID:     uint(groupID),
 					GroupIDs:    groupIDsStr,
 				}
@@ -154,6 +160,7 @@ var mutationType = graphql.NewObject(graphql.ObjectConfig{
 					return nil, errors.New("failed to create node")
 				}
 
+				UpdateNodeTrafficRateCache(node.ID, node.TrafficRate)
 				return &node, nil
 			},
 		},
@@ -224,6 +231,7 @@ var mutationType = graphql.NewObject(graphql.ObjectConfig{
 					return nil, errors.New("failed to update node")
 				}
 
+				UpdateNodeTrafficRateCache(node.ID, node.TrafficRate)
 				return &node, nil
 			},
 		},
@@ -248,6 +256,7 @@ var mutationType = graphql.NewObject(graphql.ObjectConfig{
 				}
 
 				id := p.Args["id"].(int)
+				DeleteNodeTrafficRateCache(uint(id))
 				if err := database.DB.Delete(&models.Node{}, id).Error; err != nil {
 					return nil, errors.New("failed to delete node")
 				}
@@ -522,6 +531,7 @@ var mutationType = graphql.NewObject(graphql.ObjectConfig{
 			Args: graphql.FieldConfigArgument{
 				"id":            &graphql.ArgumentConfig{Type: graphql.NewNonNull(graphql.Int)},
 				"email":         &graphql.ArgumentConfig{Type: graphql.String},
+				"username":      &graphql.ArgumentConfig{Type: graphql.String},
 				"password":      &graphql.ArgumentConfig{Type: graphql.String},
 				"balance":       &graphql.ArgumentConfig{Type: graphql.Float},
 				"speed_limit":   &graphql.ArgumentConfig{Type: graphql.Int},
@@ -560,6 +570,10 @@ var mutationType = graphql.NewObject(graphql.ObjectConfig{
 						return nil, errors.New("email already in use")
 					}
 					user.Email = email
+				}
+
+				if val, ok := p.Args["username"]; ok {
+					user.Username = val.(string)
 				}
 
 				if val, ok := p.Args["password"]; ok {
@@ -1008,6 +1022,53 @@ var mutationType = graphql.NewObject(graphql.ObjectConfig{
 				c.Set("user", &dbUser)
 
 				return &dbUser, nil
+			},
+		},
+		// Update profile mutation (User themselves)
+		"updateProfile": &graphql.Field{
+			Type: userType,
+			Args: graphql.FieldConfigArgument{
+				"username": &graphql.ArgumentConfig{Type: graphql.String},
+				"password": &graphql.ArgumentConfig{Type: graphql.String},
+			},
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				c, ok := p.Context.(*gin.Context)
+				if !ok {
+					return nil, errors.New("invalid context")
+				}
+				uVal, exists := c.Get("user")
+				if !exists {
+					return nil, errors.New("unauthorized")
+				}
+				currentUser := uVal.(*models.User)
+
+				var user models.User
+				if err := database.DB.First(&user, currentUser.ID).Error; err != nil {
+					return nil, errors.New("user not found")
+				}
+
+				if val, ok := p.Args["username"]; ok {
+					user.Username = val.(string)
+				}
+
+				if val, ok := p.Args["password"]; ok {
+					password := val.(string)
+					if password != "" {
+						hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+						if err != nil {
+							return nil, errors.New("failed to hash password")
+						}
+						user.Password = string(hashed)
+					}
+				}
+
+				if err := database.DB.Save(&user).Error; err != nil {
+					return nil, errors.New("failed to update profile")
+				}
+
+				c.Set("user", &user)
+
+				return &user, nil
 			},
 		},
 	},

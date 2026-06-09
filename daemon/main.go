@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -26,6 +27,7 @@ type Config struct {
 		Host     string `yaml:"host"`
 		Key      string `yaml:"key"`
 		NodeID   uint   `yaml:"node_id"`
+		NodeIDs  []uint `yaml:"node_ids"`
 		Interval int    `yaml:"interval"`
 	} `yaml:"api"`
 	Xray struct {
@@ -77,6 +79,7 @@ func main() {
 	// 1. Define command line parameters
 	configPathFlag := flag.String("config", "config.yaml", "Path to config.yaml file")
 	nodeIDFlag := flag.Uint("id", 0, "Node ID to manage (overrides yaml if set)")
+	nodeIDsFlag := flag.String("ids", "", "Comma-separated list of Node IDs to manage (overrides yaml if set)")
 	apiHostFlag := flag.String("api-host", "", "Panel API host URL (overrides yaml if set)")
 	apiKeyFlag := flag.String("api-key", "", "Panel UniProxy Token (overrides yaml if set)")
 	xrayPathFlag := flag.String("xray-path", "", "Path to the xray executable (overrides yaml if set)")
@@ -108,9 +111,6 @@ func main() {
 	}
 
 	// CLI flags override YAML config values
-	if *nodeIDFlag != 0 {
-		cfg.Api.NodeID = *nodeIDFlag
-	}
 	if *apiHostFlag != "" {
 		cfg.Api.Host = *apiHostFlag
 	}
@@ -127,8 +127,30 @@ func main() {
 		cfg.Api.Interval = *intervalFlag
 	}
 
+	// Resolve the list of managed Node IDs
+	var nodeIDs []uint
+	if *nodeIDsFlag != "" {
+		parts := strings.Split(*nodeIDsFlag, ",")
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if val, err := strconv.ParseUint(p, 10, 32); err == nil {
+				nodeIDs = append(nodeIDs, uint(val))
+			}
+		}
+	} else if len(cfg.Api.NodeIDs) > 0 {
+		nodeIDs = cfg.Api.NodeIDs
+	} else if *nodeIDFlag != 0 {
+		nodeIDs = []uint{*nodeIDFlag}
+	} else {
+		nodeIDs = []uint{cfg.Api.NodeID}
+	}
+
+	if len(nodeIDs) == 0 {
+		nodeIDs = []uint{1}
+	}
+
 	log.Printf("[Daemon] Starting standalone Xray node supervisor")
-	log.Printf("[Daemon] Node ID:  %d", cfg.Api.NodeID)
+	log.Printf("[Daemon] Node IDs:  %v", nodeIDs)
 	log.Printf("[Daemon] API Host: %s", cfg.Api.Host)
 
 	// 2. Resolve Xray paths
@@ -186,147 +208,165 @@ func main() {
 	}()
 
 	// Start the supervisor loop
-	runSupervisor(ctx, cfg.Api.Host, cfg.Api.Key, cfg.Api.NodeID, xrayPath, xrayDir, configPath, cfg.Api.Interval, cfg.Dns.Servers)
+	runSupervisor(ctx, cfg.Api.Host, cfg.Api.Key, nodeIDs, xrayPath, xrayDir, configPath, cfg.Api.Interval, cfg.Dns.Servers)
 }
 
-func fetchConfigFromApi(apiHost, apiKey string, nodeID uint, dnsServers []string) ([]byte, error) {
+func fetchAllConfigsFromApi(apiHost, apiKey string, nodeIDs []uint, dnsServers []string) ([]byte, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
 
-	// 1. Fetch Node Config
-	configUrl := fmt.Sprintf("%s/api/v1/server/UniProxy/config?node_id=%d", apiHost, nodeID)
-	reqConfig, err := http.NewRequest("GET", configUrl, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create config request: %w", err)
-	}
-	reqConfig.Header.Set("Token", apiKey)
+	var inbounds []interface{}
 
-	respConfig, err := client.Do(reqConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch node config: %w", err)
-	}
-	defer respConfig.Body.Close()
-
-	if respConfig.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(respConfig.Body)
-		return nil, fmt.Errorf("node config request failed with status %d: %s", respConfig.StatusCode, string(body))
-	}
-
-	var configRes ApiNodeConfigResponse
-	if err := json.NewDecoder(respConfig.Body).Decode(&configRes); err != nil {
-		return nil, fmt.Errorf("failed to decode node config: %w", err)
-	}
-
-	// 2. Fetch Users
-	usersUrl := fmt.Sprintf("%s/api/v1/server/UniProxy/user?node_id=%d", apiHost, nodeID)
-	reqUsers, err := http.NewRequest("GET", usersUrl, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create users request: %w", err)
-	}
-	reqUsers.Header.Set("Token", apiKey)
-
-	respUsers, err := client.Do(reqUsers)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch users: %w", err)
-	}
-	defer respUsers.Body.Close()
-
-	if respUsers.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(respUsers.Body)
-		return nil, fmt.Errorf("users request failed with status %d: %s", respUsers.StatusCode, string(body))
-	}
-
-	var usersRes ApiNodeUsersResponse
-	if err := json.NewDecoder(respUsers.Body).Decode(&usersRes); err != nil {
-		return nil, fmt.Errorf("failed to decode users response: %w", err)
-	}
-
-	// 3. Convert API structures into Xray JSON config format
-	clients := []map[string]interface{}{}
-	for _, u := range usersRes.Data {
-		clientObj := map[string]interface{}{
-			"email": fmt.Sprintf("user_%d@hy-board.com", u.ID),
+	for _, nodeID := range nodeIDs {
+		// 1. Fetch Node Config
+		configUrl := fmt.Sprintf("%s/api/v1/server/UniProxy/config?node_id=%d", apiHost, nodeID)
+		reqConfig, err := http.NewRequest("GET", configUrl, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create config request for node %d: %w", nodeID, err)
 		}
+		reqConfig.Header.Set("Token", apiKey)
 
-		if configRes.Data.Type == "Trojan" || configRes.Data.Type == "Shadowsocks" {
-			clientObj["password"] = u.Password
-		} else {
-			clientObj["id"] = u.UUID
+		respConfig, err := client.Do(reqConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch config for node %d: %w", nodeID, err)
 		}
-		clients = append(clients, clientObj)
-	}
+		defer respConfig.Body.Close()
 
-	// Build StreamSettings
-	streamSettings := map[string]interface{}{
-		"network": "tcp",
-	}
-
-	// Map settings from API directly
-	for k, v := range configRes.Data.Settings {
-		if k == "streamSettings" {
-			if streamObj, ok := v.(map[string]interface{}); ok {
-				for sk, sv := range streamObj {
-					streamSettings[sk] = sv
+		if respConfig.StatusCode == http.StatusForbidden {
+			body, _ := io.ReadAll(respConfig.Body)
+			var errRes map[string]interface{}
+			if err := json.Unmarshal(body, &errRes); err == nil {
+				if disabled, ok := errRes["disabled"].(bool); ok && disabled {
+					log.Printf("[Daemon] Node %d is disabled, skipping.", nodeID)
+					continue
 				}
 			}
-		} else {
-			streamSettings[k] = v
-		}
-	}
-
-	protocol := "vless"
-	var settings map[string]interface{}
-
-	switch configRes.Data.Type {
-	case "V2ray":
-		protocol = "vmess"
-		settings = map[string]interface{}{
-			"clients": clients,
-		}
-	case "Trojan":
-		protocol = "trojan"
-		settings = map[string]interface{}{
-			"clients": clients,
-			"fallback": map[string]interface{}{
-				"dest": 80,
-			},
-		}
-	case "Shadowsocks":
-		protocol = "shadowsocks"
-		method := "aes-256-gcm"
-		if m, ok := configRes.Data.Settings["method"].(string); ok && m != "" {
-			method = m
+			return nil, fmt.Errorf("node %d config request failed with status %d: %s", nodeID, respConfig.StatusCode, string(body))
 		}
 
-		// Map clients into shadowsocks users
-		ssUsers := []map[string]interface{}{}
-		for _, c := range clients {
-			ssUser := map[string]interface{}{
-				"email":    c["email"],
-				"password": c["password"],
+		if respConfig.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(respConfig.Body)
+			return nil, fmt.Errorf("node %d config request failed with status %d: %s", nodeID, respConfig.StatusCode, string(body))
+		}
+
+		var configRes ApiNodeConfigResponse
+		if err := json.NewDecoder(respConfig.Body).Decode(&configRes); err != nil {
+			return nil, fmt.Errorf("failed to decode config for node %d: %w", nodeID, err)
+		}
+
+		// 2. Fetch Users
+		usersUrl := fmt.Sprintf("%s/api/v1/server/UniProxy/user?node_id=%d", apiHost, nodeID)
+		reqUsers, err := http.NewRequest("GET", usersUrl, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create users request for node %d: %w", nodeID, err)
+		}
+		reqUsers.Header.Set("Token", apiKey)
+
+		respUsers, err := client.Do(reqUsers)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch users for node %d: %w", nodeID, err)
+		}
+		defer respUsers.Body.Close()
+
+		if respUsers.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(respUsers.Body)
+			return nil, fmt.Errorf("node %d users request failed with status %d: %s", nodeID, respUsers.StatusCode, string(body))
+		}
+
+		var usersRes ApiNodeUsersResponse
+		if err := json.NewDecoder(respUsers.Body).Decode(&usersRes); err != nil {
+			return nil, fmt.Errorf("failed to decode users for node %d: %w", nodeID, err)
+		}
+
+		// 3. Convert API structures into Xray JSON config format
+		clients := []map[string]interface{}{}
+		for _, u := range usersRes.Data {
+			clientObj := map[string]interface{}{
+				"email": fmt.Sprintf("user_%d_node_%d@hy-board.com", u.ID, nodeID),
 			}
-			ssUsers = append(ssUsers, ssUser)
+
+			if configRes.Data.Type == "Trojan" || configRes.Data.Type == "Shadowsocks" {
+				clientObj["password"] = u.Password
+			} else {
+				clientObj["id"] = u.UUID
+			}
+			clients = append(clients, clientObj)
 		}
 
-		settings = map[string]interface{}{
-			"method":   method,
-			"password": "default-fallback-ss-multiuser-key",
-			"users":    ssUsers,
-			"network":  "tcp,udp",
+		// Build StreamSettings
+		streamSettings := map[string]interface{}{
+			"network": "tcp",
 		}
-	default: // Vless
-		protocol = "vless"
-		settings = map[string]interface{}{
-			"clients":    clients,
-			"decryption": "none",
-		}
-	}
 
-	inbound := map[string]interface{}{
-		"port":           configRes.Data.Port,
-		"protocol":       protocol,
-		"settings":       settings,
-		"streamSettings": streamSettings,
-		"tag":            "proxy-in",
+		// Map settings from API directly
+		for k, v := range configRes.Data.Settings {
+			if k == "streamSettings" {
+				if streamObj, ok := v.(map[string]interface{}); ok {
+					for sk, sv := range streamObj {
+						streamSettings[sk] = sv
+					}
+				}
+			} else {
+				streamSettings[k] = v
+			}
+		}
+
+		protocol := "vless"
+		var settings map[string]interface{}
+
+		switch configRes.Data.Type {
+		case "V2ray":
+			protocol = "vmess"
+			settings = map[string]interface{}{
+				"clients": clients,
+			}
+		case "Trojan":
+			protocol = "trojan"
+			settings = map[string]interface{}{
+				"clients": clients,
+				"fallback": map[string]interface{}{
+					"dest": 80,
+				},
+			}
+		case "Shadowsocks":
+			protocol = "shadowsocks"
+			method := "aes-256-gcm"
+			if m, ok := configRes.Data.Settings["method"].(string); ok && m != "" {
+				method = m
+			}
+
+			// Map clients into shadowsocks users
+			ssUsers := []map[string]interface{}{}
+			for _, c := range clients {
+				ssUser := map[string]interface{}{
+					"email":    c["email"],
+					"password": c["password"],
+				}
+				ssUsers = append(ssUsers, ssUser)
+			}
+
+			settings = map[string]interface{}{
+				"method":   method,
+				"password": "default-fallback-ss-multiuser-key",
+				"users":    ssUsers,
+				"network":  "tcp,udp",
+			}
+		default: // Vless
+			protocol = "vless"
+			settings = map[string]interface{}{
+				"clients":    clients,
+				"decryption": "none",
+			}
+		}
+
+		inbound := map[string]interface{}{
+			"port":           configRes.Data.Port,
+			"protocol":       protocol,
+			"settings":       settings,
+			"streamSettings": streamSettings,
+			"tag":            fmt.Sprintf("proxy-in-%d", nodeID),
+		}
+
+		inbounds = append(inbounds, inbound)
 	}
 
 	xrayConfig := map[string]interface{}{
@@ -355,7 +395,7 @@ func fetchConfigFromApi(apiHost, apiKey string, nodeID uint, dnsServers []string
 				"statsInboundDownlink": true,
 			},
 		},
-		"inbounds": []interface{}{inbound},
+		"inbounds": inbounds,
 		"outbounds": []interface{}{
 			map[string]interface{}{
 				"protocol": "freedom",
@@ -379,7 +419,7 @@ func fetchConfigFromApi(apiHost, apiKey string, nodeID uint, dnsServers []string
 	return json.MarshalIndent(xrayConfig, "", "  ")
 }
 
-func runSupervisor(ctx context.Context, apiHost, apiKey string, nodeID uint, xrayPath, xrayDir, configPath string, interval int, dnsServers []string) {
+func runSupervisor(ctx context.Context, apiHost, apiKey string, nodeIDs []uint, xrayPath, xrayDir, configPath string, interval int, dnsServers []string) {
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
 	defer ticker.Stop()
 
@@ -448,7 +488,7 @@ func runSupervisor(ctx context.Context, apiHost, apiKey string, nodeID uint, xra
 	}
 
 	// Initial check and start
-	configBytes, err := fetchConfigFromApi(apiHost, apiKey, nodeID, dnsServers)
+	configBytes, err := fetchAllConfigsFromApi(apiHost, apiKey, nodeIDs, dnsServers)
 	if err == nil {
 		hash := fmt.Sprintf("%x", configBytes)
 		currentConfigHash = hash
@@ -484,7 +524,7 @@ func runSupervisor(ctx context.Context, apiHost, apiKey string, nodeID uint, xra
 			}
 
 			// 2. Fetch config and check for changes
-			newConfigBytes, err := fetchConfigFromApi(apiHost, apiKey, nodeID, dnsServers)
+			newConfigBytes, err := fetchAllConfigsFromApi(apiHost, apiKey, nodeIDs, dnsServers)
 			if err != nil {
 				log.Printf("[Daemon] Error polling configuration from API: %v", err)
 				continue
@@ -502,17 +542,21 @@ func runSupervisor(ctx context.Context, apiHost, apiKey string, nodeID uint, xra
 			}
 
 			// 3. Query precise traffic from Xray API via gRPC StatsService
-			payloadList, err := queryTrafficFromXray(xrayPath)
+			payloadMap, err := queryTrafficFromXray(xrayPath, nodeIDs[0])
 			if err != nil {
 				log.Printf("[Daemon] Error querying traffic from Xray API: %v", err)
-			} else if len(payloadList) > 0 {
-				go reportTrafficToApi(apiHost, apiKey, nodeID, payloadList)
+			} else {
+				for nID, traffic := range payloadMap {
+					if len(traffic) > 0 {
+						go reportTrafficToApi(apiHost, apiKey, nID, traffic)
+					}
+				}
 			}
 		}
 	}
 }
 
-func queryTrafficFromXray(xrayPath string) ([]TrafficLogPayload, error) {
+func queryTrafficFromXray(xrayPath string, defaultNodeID uint) (map[uint][]TrafficLogPayload, error) {
 	cmd := exec.Command(xrayPath, "api", "statsquery", "-s", "127.0.0.1:10085", "-pattern", "user>>>", "-reset")
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -525,9 +569,9 @@ func queryTrafficFromXray(xrayPath string) ([]TrafficLogPayload, error) {
 		return nil, err
 	}
 
-	userStats := make(map[uint]*TrafficLogPayload)
+	nodeUserStats := make(map[uint]map[uint]*TrafficLogPayload)
 	for _, item := range res.Stat {
-		// Expecting format: user>>>user_2@hy-board.com>>>traffic>>>uplink
+		// Expecting format: user>>>email>>>traffic>>>uplink/downlink
 		parts := strings.Split(item.Name, ">>>")
 		if len(parts) < 4 || parts[0] != "user" || parts[2] != "traffic" {
 			continue
@@ -540,42 +584,71 @@ func queryTrafficFromXray(xrayPath string) ([]TrafficLogPayload, error) {
 			continue
 		}
 
-		// Parse user ID
-		userIDStr := strings.TrimPrefix(email, "user_")
-		atIndex := strings.Index(userIDStr, "@")
-		if atIndex <= 0 {
-			continue
-		}
-		userIDStr = userIDStr[:atIndex]
+		var userID uint
+		var nodeID uint = defaultNodeID
 
-		var uID uint
-		if _, err := fmt.Sscanf(userIDStr, "%d", &uID); err != nil {
+		// Parse email: user_<user_id>_node_<node_id>@hy-board.com or user_<user_id>@hy-board.com
+		if strings.Contains(email, "_node_") {
+			str := strings.TrimPrefix(email, "user_")
+			atIdx := strings.Index(str, "@")
+			if atIdx > 0 {
+				str = str[:atIdx]
+			}
+			subParts := strings.Split(str, "_node_")
+			if len(subParts) == 2 {
+				if val, err := strconv.ParseUint(subParts[0], 10, 32); err == nil {
+					userID = uint(val)
+				}
+				if val, err := strconv.ParseUint(subParts[1], 10, 32); err == nil {
+					nodeID = uint(val)
+				}
+			}
+		} else {
+			userIDStr := strings.TrimPrefix(email, "user_")
+			atIndex := strings.Index(userIDStr, "@")
+			if atIndex <= 0 {
+				continue
+			}
+			userIDStr = userIDStr[:atIndex]
+			if val, err := strconv.ParseUint(userIDStr, 10, 32); err == nil {
+				userID = uint(val)
+			}
+		}
+
+		if userID == 0 {
 			continue
 		}
 
 		bytesVal := uint64(item.Value)
-
 		if bytesVal == 0 {
 			continue
 		}
 
-		if _, ok := userStats[uID]; !ok {
-			userStats[uID] = &TrafficLogPayload{UserID: uID}
+		if _, ok := nodeUserStats[nodeID]; !ok {
+			nodeUserStats[nodeID] = make(map[uint]*TrafficLogPayload)
+		}
+
+		if _, ok := nodeUserStats[nodeID][userID]; !ok {
+			nodeUserStats[nodeID][userID] = &TrafficLogPayload{UserID: userID}
 		}
 
 		if direction == "uplink" {
-			userStats[uID].Up = bytesVal
+			nodeUserStats[nodeID][userID].Up = bytesVal
 		} else if direction == "downlink" {
-			userStats[uID].Down = bytesVal
+			nodeUserStats[nodeID][userID].Down = bytesVal
 		}
 	}
 
-	payloadList := make([]TrafficLogPayload, 0, len(userStats))
-	for _, p := range userStats {
-		payloadList = append(payloadList, *p)
+	payloadMap := make(map[uint][]TrafficLogPayload)
+	for nID, userMap := range nodeUserStats {
+		list := make([]TrafficLogPayload, 0, len(userMap))
+		for _, p := range userMap {
+			list = append(list, *p)
+		}
+		payloadMap[nID] = list
 	}
 
-	return payloadList, nil
+	return payloadMap, nil
 }
 
 func reportTrafficToApi(apiHost, apiKey string, nodeID uint, traffic []TrafficLogPayload) {
@@ -610,8 +683,8 @@ func reportTrafficToApi(apiHost, apiKey string, nodeID uint, traffic []TrafficLo
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		log.Printf("[Daemon] Traffic report request failed with status %d: %s", resp.StatusCode, string(body))
+		log.Printf("[Daemon] Traffic report request failed for node %d with status %d: %s", nodeID, resp.StatusCode, string(body))
 	} else {
-		log.Printf("[Daemon] Reported traffic for %d users successfully", len(traffic))
+		log.Printf("[Daemon] Reported traffic for node %d (%d users) successfully", nodeID, len(traffic))
 	}
 }

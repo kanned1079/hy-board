@@ -14,6 +14,7 @@ var userType = graphql.NewObject(graphql.ObjectConfig{
 	Fields: graphql.Fields{
 		"id":              &graphql.Field{Type: graphql.Int},
 		"email":           &graphql.Field{Type: graphql.String},
+		"username":        &graphql.Field{Type: graphql.String},
 		"v2ray_uuid":      &graphql.Field{Type: graphql.String},
 		"trojan_password": &graphql.Field{Type: graphql.String},
 		"speed_limit":     &graphql.Field{Type: graphql.Int},
@@ -139,5 +140,37 @@ var planType = graphql.NewObject(graphql.ObjectConfig{
 		"group_id":     &graphql.Field{Type: graphql.Int},
 		"show":         &graphql.Field{Type: graphql.Boolean},
 		"created_at":   &graphql.Field{Type: graphql.String},
+	},
+})
+
+var trafficLogType = graphql.NewObject(graphql.ObjectConfig{
+	Name: "TrafficLog",
+	Fields: graphql.Fields{
+		"id":      &graphql.Field{Type: graphql.Int},
+		"user_id": &graphql.Field{Type: graphql.Int},
+		"node_id": &graphql.Field{Type: graphql.Int},
+		"node_name": &graphql.Field{
+			Type: graphql.String,
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				log, ok := p.Source.(models.TrafficLog)
+				if ok {
+					return log.Node.Name, nil
+				}
+				return "", nil
+			},
+		},
+		"node_rate": &graphql.Field{
+			Type: graphql.Float,
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				log, ok := p.Source.(models.TrafficLog)
+				if ok {
+					return log.Node.TrafficRate, nil
+				}
+				return 1.0, nil
+			},
+		},
+		"up":         &graphql.Field{Type: graphql.Float},
+		"down":       &graphql.Field{Type: graphql.Float},
+		"created_at": &graphql.Field{Type: graphql.String},
 	},
 })

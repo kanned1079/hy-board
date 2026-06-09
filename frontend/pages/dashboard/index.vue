@@ -3,7 +3,7 @@
       <!-- Header with user profile -->
       <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-200 dark:border-zinc-800/80 pb-3">
         <div>
-          <h1 class="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">{{ t('welcome_client') }}</h1>
+          <h1 class="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white">{{ t('welcome_back') }}，{{ user?.username || user?.email }}</h1>
           <p class="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5">{{ t('status') }}: <span class="text-primary-500 dark:text-primary-400 font-semibold">{{ t('connected') }}</span></p>
         </div>
       </header>
@@ -198,6 +198,7 @@ async function fetchDashboard() {
             userInfo {
               id
               email
+              username
               v2ray_uuid
               total_traffic
               used_traffic

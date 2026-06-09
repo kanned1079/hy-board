@@ -12,6 +12,7 @@ type User struct {
 	UpdatedAt      time.Time      `json:"updated_at"`
 	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
 	Email          string         `gorm:"uniqueIndex;not null;size:255" json:"email"`
+	Username       string         `gorm:"size:100" json:"username"`
 	Password       string         `gorm:"not null;size:255" json:"-"`
 	V2rayUUID      string         `gorm:"uniqueIndex;size:36" json:"v2ray_uuid"`
 	TrojanPassword string         `gorm:"size:64" json:"trojan_password"`
@@ -46,6 +47,7 @@ type TrafficLog struct {
 	ID        uint64    `gorm:"primaryKey" json:"id"`
 	UserID    uint      `gorm:"index" json:"user_id"`
 	NodeID    uint      `gorm:"index" json:"node_id"`
+	Node      Node      `gorm:"foreignKey:NodeID" json:"node"`
 	Up        uint64    `gorm:"default:0" json:"up"`
 	Down      uint64    `gorm:"default:0" json:"down"`
 	CreatedAt time.Time `gorm:"index" json:"created_at"`

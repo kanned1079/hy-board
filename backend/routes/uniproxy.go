@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"hy-board-backend/database"
@@ -25,6 +26,43 @@ type PushPayload struct {
 	Traffic []TrafficLogPayload `json:"traffic"`
 }
 
+var (
+	trafficRateCache = make(map[uint]float32)
+	cacheMu          sync.RWMutex
+)
+
+func GetNodeTrafficRate(nodeID uint) float32 {
+	cacheMu.RLock()
+	rate, exists := trafficRateCache[nodeID]
+	cacheMu.RUnlock()
+	if exists {
+		return rate
+	}
+
+	// Fallback to database query
+	var node models.Node
+	if err := database.DB.First(&node, nodeID).Error; err == nil {
+		cacheMu.Lock()
+		trafficRateCache[nodeID] = node.TrafficRate
+		cacheMu.Unlock()
+		return node.TrafficRate
+	}
+
+	return 1.0
+}
+
+func UpdateNodeTrafficRateCache(nodeID uint, rate float32) {
+	cacheMu.Lock()
+	trafficRateCache[nodeID] = rate
+	cacheMu.Unlock()
+}
+
+func DeleteNodeTrafficRateCache(nodeID uint) {
+	cacheMu.Lock()
+	delete(trafficRateCache, nodeID)
+	cacheMu.Unlock()
+}
+
 // GetNodeConfig handles GET /api/v1/server/UniProxy/config
 func GetNodeConfig(c *gin.Context) {
 	nodeIDStr := c.Query("node_id")
@@ -40,8 +78,19 @@ func GetNodeConfig(c *gin.Context) {
 		return
 	}
 
+	if !node.Show {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":    "node is disabled",
+			"disabled": true,
+		})
+		return
+	}
+
 	// Update node's updated_at timestamp to register a heartbeat
 	database.DB.Model(&node).Update("updated_at", time.Now())
+
+	// Update traffic rate cache
+	UpdateNodeTrafficRateCache(node.ID, node.TrafficRate)
 
 	// Deserialize settings JSON
 	var settingsMap map[string]interface{}
@@ -72,6 +121,13 @@ func GetNodeUsers(c *gin.Context) {
 		if nodeID, err := strconv.ParseUint(nodeIDStr, 10, 32); err == nil {
 			var node models.Node
 			if err := database.DB.First(&node, uint(nodeID)).Error; err == nil {
+				if !node.Show {
+					c.JSON(http.StatusForbidden, gin.H{
+						"error":    "node is disabled",
+						"disabled": true,
+					})
+					return
+				}
 				// Parse allowed group IDs
 				parts := strings.Split(node.GroupIDs, ",")
 				var allowedGroupIDs []uint
@@ -127,17 +183,22 @@ func PushNodeData(c *gin.Context) {
 		return
 	}
 
+	trafficRate := GetNodeTrafficRate(payload.NodeID)
+
 	tx := database.DB.Begin()
 	for _, t := range payload.Traffic {
+		upMultiplied := uint64(float64(t.Up) * float64(trafficRate))
+		downMultiplied := uint64(float64(t.Down) * float64(trafficRate))
+
 		// Increment user's used traffic
-		tx.Model(&models.User{}).Where("id = ?", t.UserID).UpdateColumn("used_traffic", gorm.Expr("used_traffic + ?", t.Up+t.Down))
+		tx.Model(&models.User{}).Where("id = ?", t.UserID).UpdateColumn("used_traffic", gorm.Expr("used_traffic + ?", upMultiplied+downMultiplied))
 
 		// Log traffic
 		log := models.TrafficLog{
 			UserID:    t.UserID,
 			NodeID:    payload.NodeID,
-			Up:        t.Up,
-			Down:      t.Down,
+			Up:        upMultiplied,
+			Down:      downMultiplied,
 			CreatedAt: time.Now(),
 		}
 		tx.Create(&log)

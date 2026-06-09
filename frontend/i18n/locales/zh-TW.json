@@ -120,5 +120,15 @@
   "balance": "餘額",
   "edit_user": "編輯用戶",
   "delete_user": "刪除用戶",
-  "confirm_delete_user": "確認刪除該用戶？"
+  "confirm_delete_user": "確認刪除該用戶？",
+  "traffic_audit_log": "流量消耗明細",
+  "node_name": "節點名稱",
+  "rate": "倍率",
+  "upload": "上傳",
+  "download": "下載",
+  "calculated_total": "折算總消耗",
+  "time": "時間",
+  "search_node": "搜尋節點...",
+  "load_more_logs": "載入更多記錄",
+  "no_logs": "暫無流量消耗記錄"
 }

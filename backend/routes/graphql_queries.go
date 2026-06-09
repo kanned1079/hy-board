@@ -36,12 +36,18 @@ var queryType = graphql.NewObject(graphql.ObjectConfig{
 				if !ok {
 					return nil, errors.New("invalid context")
 				}
-				_, exists := c.Get("user")
+				uVal, exists := c.Get("user")
 				if !exists {
 					return nil, errors.New("unauthorized")
 				}
+				currentUser := uVal.(*models.User)
+
 				var nodes []models.Node
-				if err := database.DB.Where("show = ?", true).Find(&nodes).Error; err != nil {
+				query := database.DB
+				if !currentUser.IsAdmin {
+					query = query.Where("show = ?", true)
+				}
+				if err := query.Find(&nodes).Error; err != nil {
 					return nil, err
 				}
 				return nodes, nil
@@ -180,6 +186,49 @@ var queryType = graphql.NewObject(graphql.ObjectConfig{
 					return nil, err
 				}
 				return plans, nil
+			},
+		},
+		// Query current user's traffic logs
+		"trafficLogs": &graphql.Field{
+			Type: graphql.NewList(trafficLogType),
+			Args: graphql.FieldConfigArgument{
+				"limit":  &graphql.ArgumentConfig{Type: graphql.Int},
+				"offset": &graphql.ArgumentConfig{Type: graphql.Int},
+			},
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				c, ok := p.Context.(*gin.Context)
+				if !ok {
+					return nil, errors.New("invalid context")
+				}
+				uVal, exists := c.Get("user")
+				if !exists {
+					return nil, errors.New("unauthorized")
+				}
+				currentUser := uVal.(*models.User)
+
+				limit := 50
+				if lVal, ok := p.Args["limit"].(int); ok && lVal > 0 {
+					limit = lVal
+					if limit > 100 {
+						limit = 100
+					}
+				}
+
+				offset := 0
+				if oVal, ok := p.Args["offset"].(int); ok && oVal >= 0 {
+					offset = oVal
+				}
+
+				var logs []models.TrafficLog
+				if err := database.DB.Preload("Node").
+					Where("user_id = ?", currentUser.ID).
+					Order("created_at desc").
+					Limit(limit).
+					Offset(offset).
+					Find(&logs).Error; err != nil {
+					return nil, err
+				}
+				return logs, nil
 			},
 		},
 	},

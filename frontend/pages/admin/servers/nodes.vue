@@ -39,6 +39,7 @@
               <th class="py-2.5 px-3">端口</th>
               <th class="py-2.5 px-3">流量倍率</th>
               <th class="py-2.5 px-3">要求訂閱等級</th>
+              <th class="py-2.5 px-3">啟用</th>
               <th class="py-2.5 px-3 text-right">操作</th>
             </tr>
           </thead>
@@ -79,6 +80,13 @@
                     {{ getGroupName(parseInt(gId)) }}
                   </UBadge>
                 </div>
+              </td>
+              <td class="py-3 px-3">
+                <USwitch
+                  :model-value="node.show"
+                  color="primary"
+                  @update:model-value="toggleNodeShow(node)"
+                />
               </td>
               <td class="py-3 px-3 text-right flex justify-end gap-1.5">
                 <UButton
@@ -216,6 +224,10 @@
               </div>
             </UFormField>
 
+            <UFormField label="啟用此節點" name="show" class="text-slate-700 dark:text-zinc-300 flex items-center justify-between pt-1">
+              <USwitch v-model="newNode.show" color="primary" />
+            </UFormField>
+
             <div class="pt-2 flex justify-end gap-2">
               <UButton color="neutral" variant="ghost" size="sm" @click="isNodeModalOpen = false">取消</UButton>
               <UButton type="submit" color="primary" size="sm" :loading="modalLoading">
@@ -273,7 +285,8 @@ const newNode = ref({
   path: '/vless',
   ssMethod: 'aes-256-gcm',
   enableTls: false,
-  host: ''
+  host: '',
+  show: true
 })
 
 const openAddModal = () => {
@@ -292,7 +305,8 @@ const openAddModal = () => {
     path: '/vless',
     ssMethod: 'aes-256-gcm',
     enableTls: false,
-    host: ''
+    host: '',
+    show: true
   }
   isNodeModalOpen.value = true
 }
@@ -352,7 +366,8 @@ const openEditModal = (node) => {
     path,
     ssMethod,
     enableTls,
-    host
+    host,
+    show: node.show
   }
   isNodeModalOpen.value = true
 }
@@ -381,6 +396,7 @@ const fetchData = async () => {
               group_id
               group_ids
               settings
+              show
               online
               status
             }
@@ -483,8 +499,8 @@ const createNode = async () => {
       headers: { Authorization: `Bearer ${token}` },
       body: {
         query: `
-          mutation CreateNode($name: String!, $type: String!, $address: String!, $port: Int!, $traffic_rate: Float!, $settings: String, $group_id: Int, $group_ids: String) {
-            createNode(name: $name, type: $type, address: $address, port: $port, traffic_rate: $traffic_rate, settings: $settings, group_id: $group_id, group_ids: $group_ids) {
+          mutation CreateNode($name: String!, $type: String!, $address: String!, $port: Int!, $traffic_rate: Float!, $settings: String, $group_id: Int, $group_ids: String, $show: Boolean) {
+            createNode(name: $name, type: $type, address: $address, port: $port, traffic_rate: $traffic_rate, settings: $settings, group_id: $group_id, group_ids: $group_ids, show: $show) {
               id
               name
             }
@@ -498,7 +514,8 @@ const createNode = async () => {
           traffic_rate: newNode.value.traffic_rate,
           settings: settingsJson,
           group_id: newNode.value.group_ids[0] || 1,
-          group_ids: newNode.value.group_ids.join(',')
+          group_ids: newNode.value.group_ids.join(','),
+          show: newNode.value.show
         }
       }
     })
@@ -577,8 +594,8 @@ const saveNodeChanges = async () => {
       headers: { Authorization: `Bearer ${token}` },
       body: {
         query: `
-          mutation UpdateNode($id: Int!, $name: String!, $type: String!, $address: String!, $port: Int!, $traffic_rate: Float!, $settings: String, $group_id: Int, $group_ids: String) {
-            updateNode(id: $id, name: $name, type: $type, address: $address, port: $port, traffic_rate: $traffic_rate, settings: $settings, group_id: $group_id, group_ids: $group_ids) {
+          mutation UpdateNode($id: Int!, $name: String!, $type: String!, $address: String!, $port: Int!, $traffic_rate: Float!, $settings: String, $group_id: Int, $group_ids: String, $show: Boolean) {
+            updateNode(id: $id, name: $name, type: $type, address: $address, port: $port, traffic_rate: $traffic_rate, settings: $settings, group_id: $group_id, group_ids: $group_ids, show: $show) {
               id
               name
             }
@@ -593,7 +610,8 @@ const saveNodeChanges = async () => {
           traffic_rate: newNode.value.traffic_rate,
           settings: settingsJson,
           group_id: newNode.value.group_ids[0] || 1,
-          group_ids: newNode.value.group_ids.join(',')
+          group_ids: newNode.value.group_ids.join(','),
+          show: newNode.value.show
         }
       }
     })
@@ -663,6 +681,56 @@ const deleteNode = async (id) => {
     })
   } finally {
     deleteLoadingId.value = null
+  }
+}
+
+const toggleNodeShow = async (node) => {
+  const token = useCookie('auth_token').value
+  const newShowValue = !node.show
+  try {
+    const response = await $fetch(`${config.public.apiBase}/graphql`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: {
+        query: `
+          mutation UpdateNodeStatus($id: Int!, $name: String!, $type: String!, $address: String!, $port: Int!, $traffic_rate: Float!, $show: Boolean) {
+            updateNode(id: $id, name: $name, type: $type, address: $address, port: $port, traffic_rate: $traffic_rate, show: $show) {
+              id
+              show
+            }
+          }
+        `,
+        variables: {
+          id: node.id,
+          name: node.name,
+          type: node.type,
+          address: node.address,
+          port: node.port,
+          traffic_rate: node.traffic_rate,
+          show: newShowValue
+        }
+      }
+    })
+
+    if (response.errors && response.errors.length > 0) {
+      throw new Error(response.errors[0].message)
+    }
+
+    node.show = newShowValue
+    toast.add({
+      id: 'node_status_toggled',
+      title: '狀態已更新',
+      description: `已成功${newShowValue ? '啟用' : '停用'}節點：${node.name}`,
+      color: 'success',
+      timeout: 2000
+    })
+  } catch (error) {
+    toast.add({
+      id: 'toggle_failed',
+      title: '更新失敗',
+      description: error.message || '修改節點狀態失敗',
+      color: 'error'
+    })
   }
 }
 </script>

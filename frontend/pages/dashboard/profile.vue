@@ -22,11 +22,39 @@
           <span>{{ t('account_info') || 'Account Information' }}</span>
         </h2>
 
+        <!-- Username setting alert if not set -->
+        <div v-if="!user?.username" class="p-3 bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 dark:border-amber-500/10 rounded-lg flex items-center space-x-2 text-amber-600 dark:text-amber-400 text-xs">
+          <UIcon name="i-lucide-alert-circle" class="w-4.5 h-4.5 flex-shrink-0" />
+          <span>您尚未設定用戶名。設定用戶名可以讓您的介面更加個人化！</span>
+        </div>
+
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
           <!-- Email -->
           <div class="space-y-1">
             <span class="text-slate-400 dark:text-zinc-500 font-medium">{{ t('email') }}</span>
             <p class="font-bold text-slate-800 dark:text-zinc-200">{{ user?.email }}</p>
+          </div>
+          <!-- Username Input -->
+          <div class="space-y-1 sm:col-span-2">
+            <span class="text-slate-400 dark:text-zinc-500 font-medium">用戶名</span>
+            <div class="flex gap-2 items-center">
+              <UInput
+                v-model="usernameInput"
+                placeholder="輸入用戶名..."
+                size="sm"
+                color="primary"
+                class="flex-1 max-w-xs"
+              />
+              <UButton
+                :loading="updatingProfile"
+                label="儲存"
+                color="primary"
+                size="xs"
+                variant="solid"
+                class="px-3 py-1.5 shrink-0"
+                @click="saveProfile"
+              />
+            </div>
           </div>
           <!-- Balance -->
           <div class="space-y-1">
@@ -148,6 +176,9 @@ const loading = ref(true)
 const showUuid = ref(false)
 const showTrojan = ref(false)
 
+const usernameInput = ref('')
+const updatingProfile = ref(false)
+
 const toast = useToast()
 const router = useRouter()
 const config = useRuntimeConfig()
@@ -173,6 +204,7 @@ onMounted(async () => {
             userInfo {
               id
               email
+              username
               v2ray_uuid
               trojan_password
               expired_at
@@ -190,6 +222,7 @@ onMounted(async () => {
     }
 
     user.value = response.data.userInfo
+    usernameInput.value = response.data.userInfo.username || ''
   } catch (error) {
     toast.add({
       id: 'session_expired',
@@ -202,6 +235,51 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+const saveProfile = async () => {
+  updatingProfile.value = true
+  const token = useCookie('auth_token').value
+  try {
+    const response = await $fetch(`${config.public.apiBase}/graphql`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: {
+        query: `
+          mutation UpdateUserProfile($username: String) {
+            updateProfile(username: $username) {
+              id
+              username
+            }
+          }
+        `,
+        variables: {
+          username: usernameInput.value
+        }
+      }
+    })
+
+    if (response.errors && response.errors.length > 0) {
+      throw new Error(response.errors[0].message)
+    }
+
+    user.value.username = response.data.updateProfile.username
+    toast.add({
+      id: 'profile_updated',
+      title: t('success') || '成功',
+      description: '用戶名更新成功！',
+      color: 'green'
+    })
+  } catch (error) {
+    toast.add({
+      id: 'profile_update_failed',
+      title: t('error') || '錯誤',
+      description: error.message,
+      color: 'red'
+    })
+  } finally {
+    updatingProfile.value = false
+  }
+}
 
 const formatDate = (dateStr) => {
   if (!dateStr) return t('lifetime')
