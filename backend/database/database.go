@@ -69,11 +69,56 @@ func Migrate() {
 		&models.TicketMessage{},
 		&models.Group{},
 		&models.Plan{},
+		&models.SystemSetting{},
 	)
 	if err != nil {
 		log.Fatalf("Database migration failed: %v", err)
 	}
 	log.Println("Database schema auto-migrated successfully.")
+
+	// Auto-seed default settings if none exist
+	var settingsCount int64
+	DB.Model(&models.SystemSetting{}).Count(&settingsCount)
+	if settingsCount == 0 {
+		token := "secret-uniproxy-token"
+		if config.GlobalConfig != nil && config.GlobalConfig.Auth.UniProxyToken != "" {
+			token = config.GlobalConfig.Auth.UniProxyToken
+		}
+		defaultSettings := map[string]string{
+			"site_name":                 "HY-Board",
+			"site_description":          "High-Aesthetic XrayR Management Panel",
+			"site_url":                  "http://localhost:3000",
+			"tos_url":                   "",
+			"stop_register":             "false",
+			"currency_unit":             "CNY",
+			"currency_symbol":           "¥",
+			"email_verify":              "false",
+			"ban_gmail_alias":           "false",
+			"ip_register_limit":         "false",
+			"ip_register_limit_count":   "5",
+			"ip_register_limit_penalty": "60",
+			"theme_color":               "green",
+			"home_background":           "",
+			"uniproxy_token":            token,
+			"node_pull_interval":        "60",
+			"node_push_interval":        "60",
+			"smtp_host":                 "",
+			"smtp_port":                 "465",
+			"smtp_encryption":           "SSL",
+			"smtp_username":             "",
+			"smtp_password":             "",
+			"smtp_from":                 "",
+			"app_win":                   "",
+			"app_macos":                 "",
+			"app_linux":                 "",
+			"app_android":               "",
+			"app_ios":                   "",
+		}
+		for k, v := range defaultSettings {
+			DB.Create(&models.SystemSetting{Key: k, Value: v})
+		}
+		log.Println("Default system settings seeded successfully.")
+	}
 
 	// Auto-seed default permission groups if none exist
 	var count int64

@@ -231,5 +231,76 @@ var queryType = graphql.NewObject(graphql.ObjectConfig{
 				return logs, nil
 			},
 		},
+		// Query admin system settings (Admin only)
+		"systemSettings": &graphql.Field{
+			Type: systemSettingsType,
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				c, ok := p.Context.(*gin.Context)
+				if !ok {
+					return nil, errors.New("invalid context")
+				}
+				u, exists := c.Get("user")
+				if !exists {
+					return nil, errors.New("unauthorized")
+				}
+				currentUser := u.(*models.User)
+				if !currentUser.IsAdmin {
+					return nil, errors.New("admin privilege required")
+				}
+
+				return map[string]interface{}{
+					"site_name":                 database.GetSetting("site_name"),
+					"site_description":          database.GetSetting("site_description"),
+					"site_url":                  database.GetSetting("site_url"),
+					"tos_url":                   database.GetSetting("tos_url"),
+					"stop_register":             database.GetSettingBool("stop_register"),
+					"currency_unit":             database.GetSetting("currency_unit"),
+					"currency_symbol":           database.GetSetting("currency_symbol"),
+					"email_verify":              database.GetSettingBool("email_verify"),
+					"ban_gmail_alias":           database.GetSettingBool("ban_gmail_alias"),
+					"ip_register_limit":         database.GetSettingBool("ip_register_limit"),
+					"ip_register_limit_count":   database.GetSettingInt("ip_register_limit_count"),
+					"ip_register_limit_penalty": database.GetSettingInt("ip_register_limit_penalty"),
+					"theme_color":               database.GetSetting("theme_color"),
+					"home_background":           database.GetSetting("home_background"),
+					"uniproxy_token":            database.GetSetting("uniproxy_token"),
+					"node_pull_interval":        database.GetSettingInt("node_pull_interval"),
+					"node_push_interval":        database.GetSettingInt("node_push_interval"),
+					"smtp_host":                 database.GetSetting("smtp_host"),
+					"smtp_port":                 database.GetSettingInt("smtp_port"),
+					"smtp_encryption":           database.GetSetting("smtp_encryption"),
+					"smtp_username":             database.GetSetting("smtp_username"),
+					"smtp_password":             database.GetSetting("smtp_password"),
+					"smtp_from":                 database.GetSetting("smtp_from"),
+					"app_win":                   database.GetSetting("app_win"),
+					"app_macos":                 database.GetSetting("app_macos"),
+					"app_linux":                 database.GetSetting("app_linux"),
+					"app_android":               database.GetSetting("app_android"),
+					"app_ios":                   database.GetSetting("app_ios"),
+				}, nil
+			},
+		},
+		// Query public site settings (accessible to anyone)
+		"publicSettings": &graphql.Field{
+			Type: publicSettingsType,
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				return map[string]interface{}{
+					"site_name":        database.GetSetting("site_name"),
+					"site_description": database.GetSetting("site_description"),
+					"site_url":         database.GetSetting("site_url"),
+					"tos_url":          database.GetSetting("tos_url"),
+					"stop_register":    database.GetSettingBool("stop_register"),
+					"currency_unit":    database.GetSetting("currency_unit"),
+					"currency_symbol":  database.GetSetting("currency_symbol"),
+					"theme_color":      database.GetSetting("theme_color"),
+					"home_background":  database.GetSetting("home_background"),
+					"app_win":          database.GetSetting("app_win"),
+					"app_macos":        database.GetSetting("app_macos"),
+					"app_linux":        database.GetSetting("app_linux"),
+					"app_android":      database.GetSetting("app_android"),
+					"app_ios":          database.GetSetting("app_ios"),
+				}, nil
+			},
+		},
 	},
 })

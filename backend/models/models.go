@@ -25,6 +25,7 @@ type User struct {
 	IsAdmin        bool           `gorm:"default:false" json:"is_admin"`
 	Balance        float64        `gorm:"default:0.0" json:"balance"`
 	GroupID        uint           `gorm:"default:1" json:"group_id"` // Subscription Level (1 = S1, 2 = S2, 99 = Admin)
+	RegisterIP     string         `gorm:"size:45" json:"register_ip"`
 }
 
 type Node struct {
@@ -119,4 +120,12 @@ type Plan struct {
 	ExpiryDays  uint32         `gorm:"not null;default:30" json:"expiry_days"` // Duration of subscription plan
 	GroupID     uint           `gorm:"not null;default:1" json:"group_id"`     // Maps to subscription level Group ID
 	Show        bool           `gorm:"default:true" json:"show"`
+}
+
+type SystemSetting struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Key       string    `gorm:"uniqueIndex;not null;size:100" json:"key"`
+	Value     string    `gorm:"type:text" json:"value"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

@@ -26,6 +26,7 @@ var userType = graphql.NewObject(graphql.ObjectConfig{
 		"is_admin":        &graphql.Field{Type: graphql.Boolean},
 		"balance":         &graphql.Field{Type: graphql.Float},
 		"group_id":        &graphql.Field{Type: graphql.Int},
+		"register_ip":     &graphql.Field{Type: graphql.String},
 	},
 })
 
@@ -172,5 +173,59 @@ var trafficLogType = graphql.NewObject(graphql.ObjectConfig{
 		"up":         &graphql.Field{Type: graphql.Float},
 		"down":       &graphql.Field{Type: graphql.Float},
 		"created_at": &graphql.Field{Type: graphql.String},
+	},
+})
+
+var systemSettingsType = graphql.NewObject(graphql.ObjectConfig{
+	Name: "SystemSettings",
+	Fields: graphql.Fields{
+		"site_name":                 &graphql.Field{Type: graphql.String},
+		"site_description":          &graphql.Field{Type: graphql.String},
+		"site_url":                  &graphql.Field{Type: graphql.String},
+		"tos_url":                   &graphql.Field{Type: graphql.String},
+		"stop_register":             &graphql.Field{Type: graphql.Boolean},
+		"currency_unit":             &graphql.Field{Type: graphql.String},
+		"currency_symbol":           &graphql.Field{Type: graphql.String},
+		"email_verify":              &graphql.Field{Type: graphql.Boolean},
+		"ban_gmail_alias":           &graphql.Field{Type: graphql.Boolean},
+		"ip_register_limit":         &graphql.Field{Type: graphql.Boolean},
+		"ip_register_limit_count":   &graphql.Field{Type: graphql.Int},
+		"ip_register_limit_penalty": &graphql.Field{Type: graphql.Int},
+		"theme_color":               &graphql.Field{Type: graphql.String},
+		"home_background":           &graphql.Field{Type: graphql.String},
+		"uniproxy_token":            &graphql.Field{Type: graphql.String},
+		"node_pull_interval":        &graphql.Field{Type: graphql.Int},
+		"node_push_interval":        &graphql.Field{Type: graphql.Int},
+		"smtp_host":                 &graphql.Field{Type: graphql.String},
+		"smtp_port":                 &graphql.Field{Type: graphql.Int},
+		"smtp_encryption":           &graphql.Field{Type: graphql.String},
+		"smtp_username":             &graphql.Field{Type: graphql.String},
+		"smtp_password":             &graphql.Field{Type: graphql.String},
+		"smtp_from":                 &graphql.Field{Type: graphql.String},
+		"app_win":                   &graphql.Field{Type: graphql.String},
+		"app_macos":                 &graphql.Field{Type: graphql.String},
+		"app_linux":                 &graphql.Field{Type: graphql.String},
+		"app_android":               &graphql.Field{Type: graphql.String},
+		"app_ios":                   &graphql.Field{Type: graphql.String},
+	},
+})
+
+var publicSettingsType = graphql.NewObject(graphql.ObjectConfig{
+	Name: "PublicSettings",
+	Fields: graphql.Fields{
+		"site_name":        &graphql.Field{Type: graphql.String},
+		"site_description": &graphql.Field{Type: graphql.String},
+		"site_url":         &graphql.Field{Type: graphql.String},
+		"tos_url":          &graphql.Field{Type: graphql.String},
+		"stop_register":    &graphql.Field{Type: graphql.Boolean},
+		"currency_unit":    &graphql.Field{Type: graphql.String},
+		"currency_symbol":  &graphql.Field{Type: graphql.String},
+		"theme_color":      &graphql.Field{Type: graphql.String},
+		"home_background":  &graphql.Field{Type: graphql.String},
+		"app_win":          &graphql.Field{Type: graphql.String},
+		"app_macos":        &graphql.Field{Type: graphql.String},
+		"app_linux":        &graphql.Field{Type: graphql.String},
+		"app_android":      &graphql.Field{Type: graphql.String},
+		"app_ios":          &graphql.Field{Type: graphql.String},
 	},
 })

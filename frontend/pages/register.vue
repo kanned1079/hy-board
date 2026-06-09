@@ -8,7 +8,13 @@
         <p class="text-[11px] text-slate-500 dark:text-zinc-400">{{ t('register_desc') }}</p>
       </div>
 
-      <form @submit.prevent="handleRegister" class="space-y-4">
+      <!-- Registration Disabled Message -->
+      <div v-if="stopRegister" class="p-3 mb-4 rounded-lg bg-error-50 dark:bg-error-950/30 border border-error-200 dark:border-error-800 text-error-700 dark:text-error-400 text-xs text-center space-y-1">
+        <p class="font-bold">註冊通道已關閉</p>
+        <p>目前站點暫停開放新用戶註冊，請聯絡管理員。</p>
+      </div>
+
+      <form v-else @submit.prevent="handleRegister" class="space-y-4">
         <UFormField :label="t('email')" name="email" class="text-slate-700 dark:text-zinc-300 text-xs">
           <UInput
             v-model="email"
@@ -64,6 +70,8 @@ const localePath = useLocalePath()
 const email = ref('')
 const password = ref('')
 const loading = ref(false)
+const stopRegister = ref(false)
+const siteName = ref('HY-Board')
 
 const toast = useToast()
 const router = useRouter()
@@ -73,7 +81,41 @@ useSeoMeta({
   title: () => `${t('register')} - HY-Board`
 })
 
+// Fetch public settings on mount
+onMounted(async () => {
+  try {
+    const response = await $fetch(`${config.public.apiBase}/graphql`, {
+      method: 'POST',
+      body: {
+        query: `
+          query GetPublicSettings {
+            publicSettings {
+              site_name
+              stop_register
+            }
+          }
+        `
+      }
+    })
+    if (response.data && response.data.publicSettings) {
+      stopRegister.value = response.data.publicSettings.stop_register
+      siteName.value = response.data.publicSettings.site_name
+    }
+  } catch (err) {
+    // Ignore error
+  }
+})
+
 const handleRegister = async () => {
+  if (stopRegister.value) {
+    toast.add({
+      id: 'register_disabled',
+      title: '註冊已暫停',
+      description: '目前暫不開放新用戶註冊',
+      color: 'error'
+    })
+    return
+  }
   loading.value = true
   try {
     const response = await $fetch(`${config.public.apiBase}/graphql`, {

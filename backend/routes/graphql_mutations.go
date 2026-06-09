@@ -13,6 +13,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/graphql-go/graphql"
 	"golang.org/x/crypto/bcrypt"
+	"strconv"
+	"strings"
 )
 
 var mutationType = graphql.NewObject(graphql.ObjectConfig{
@@ -62,8 +64,69 @@ var mutationType = graphql.NewObject(graphql.ObjectConfig{
 				"password": &graphql.ArgumentConfig{Type: graphql.NewNonNull(graphql.String)},
 			},
 			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				c, ok := p.Context.(*gin.Context)
+				if !ok {
+					return nil, errors.New("invalid context")
+				}
+
+				// 1. Check stop_register
+				if database.GetSettingBool("stop_register") {
+					return nil, errors.New("registration is temporarily closed")
+				}
+
 				email := p.Args["email"].(string)
 				password := p.Args["password"].(string)
+
+				// 2. Check ban_gmail_alias
+				emailLower := strings.ToLower(strings.TrimSpace(email))
+				if database.GetSettingBool("ban_gmail_alias") {
+					if strings.HasSuffix(emailLower, "@gmail.com") || strings.HasSuffix(emailLower, "@googlemail.com") {
+						parts := strings.Split(emailLower, "@")
+						usernamePart := parts[0]
+						domainPart := parts[1]
+
+						// Reject '+' alias
+						if strings.Contains(usernamePart, "+") {
+							return nil, errors.New("Gmail alias addresses are not allowed")
+						}
+
+						// Normalize dots to check for duplicates
+						normalizedUsername := strings.ReplaceAll(usernamePart, ".", "")
+						normalizedEmail := normalizedUsername + "@" + domainPart
+
+						var gmailUsers []models.User
+						database.DB.Where("email LIKE ?", "%@gmail.com").Or("email LIKE ?", "%@googlemail.com").Find(&gmailUsers)
+						for _, gu := range gmailUsers {
+							guLower := strings.ToLower(gu.Email)
+							gParts := strings.Split(guLower, "@")
+							gUser := strings.ReplaceAll(strings.Split(gParts[0], "+")[0], ".", "")
+							gEmail := gUser + "@" + gParts[1]
+							if gEmail == normalizedEmail {
+								return nil, errors.New("a user with this normalized Gmail address already exists")
+							}
+						}
+					}
+				}
+
+				// 3. Check ip_register_limit
+				clientIP := c.ClientIP()
+				if database.GetSettingBool("ip_register_limit") {
+					limitCount := database.GetSettingInt("ip_register_limit_count")
+					if limitCount <= 0 {
+						limitCount = 5
+					}
+					penaltyMin := database.GetSettingInt("ip_register_limit_penalty")
+					if penaltyMin <= 0 {
+						penaltyMin = 60
+					}
+
+					var count int64
+					timeLimit := time.Now().Add(-time.Duration(penaltyMin) * time.Minute)
+					database.DB.Model(&models.User{}).Where("register_ip = ? AND created_at > ?", clientIP, timeLimit).Count(&count)
+					if count >= int64(limitCount) {
+						return nil, fmt.Errorf("too many registrations from this IP address, please try again in %d minutes", penaltyMin)
+					}
+				}
 
 				var existingUser models.User
 				if err := database.DB.Where("email = ?", email).First(&existingUser).Error; err == nil {
@@ -85,6 +148,7 @@ var mutationType = graphql.NewObject(graphql.ObjectConfig{
 					ExpiredAt:      time.Now().AddDate(0, 1, 0),
 					Status:         1,
 					IsAdmin:        false,
+					RegisterIP:     clientIP,
 				}
 
 				if err := database.DB.Create(&newUser).Error; err != nil {
@@ -1069,6 +1133,139 @@ var mutationType = graphql.NewObject(graphql.ObjectConfig{
 				c.Set("user", &user)
 
 				return &user, nil
+			},
+		},
+		// Update system settings (Admin only)
+		"updateSystemSettings": &graphql.Field{
+			Type: systemSettingsType,
+			Args: graphql.FieldConfigArgument{
+				"site_name":                 &graphql.ArgumentConfig{Type: graphql.String},
+				"site_description":          &graphql.ArgumentConfig{Type: graphql.String},
+				"site_url":                  &graphql.ArgumentConfig{Type: graphql.String},
+				"tos_url":                   &graphql.ArgumentConfig{Type: graphql.String},
+				"stop_register":             &graphql.ArgumentConfig{Type: graphql.Boolean},
+				"currency_unit":             &graphql.ArgumentConfig{Type: graphql.String},
+				"currency_symbol":           &graphql.ArgumentConfig{Type: graphql.String},
+				"email_verify":              &graphql.ArgumentConfig{Type: graphql.Boolean},
+				"ban_gmail_alias":           &graphql.ArgumentConfig{Type: graphql.Boolean},
+				"ip_register_limit":         &graphql.ArgumentConfig{Type: graphql.Boolean},
+				"ip_register_limit_count":   &graphql.ArgumentConfig{Type: graphql.Int},
+				"ip_register_limit_penalty": &graphql.ArgumentConfig{Type: graphql.Int},
+				"theme_color":               &graphql.ArgumentConfig{Type: graphql.String},
+				"home_background":           &graphql.ArgumentConfig{Type: graphql.String},
+				"uniproxy_token":            &graphql.ArgumentConfig{Type: graphql.String},
+				"node_pull_interval":        &graphql.ArgumentConfig{Type: graphql.Int},
+				"node_push_interval":        &graphql.ArgumentConfig{Type: graphql.Int},
+				"smtp_host":                 &graphql.ArgumentConfig{Type: graphql.String},
+				"smtp_port":                 &graphql.ArgumentConfig{Type: graphql.Int},
+				"smtp_encryption":           &graphql.ArgumentConfig{Type: graphql.String},
+				"smtp_username":             &graphql.ArgumentConfig{Type: graphql.String},
+				"smtp_password":             &graphql.ArgumentConfig{Type: graphql.String},
+				"smtp_from":                 &graphql.ArgumentConfig{Type: graphql.String},
+				"app_win":                   &graphql.ArgumentConfig{Type: graphql.String},
+				"app_macos":                 &graphql.ArgumentConfig{Type: graphql.String},
+				"app_linux":                 &graphql.ArgumentConfig{Type: graphql.String},
+				"app_android":               &graphql.ArgumentConfig{Type: graphql.String},
+				"app_ios":                   &graphql.ArgumentConfig{Type: graphql.String},
+			},
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				c, ok := p.Context.(*gin.Context)
+				if !ok {
+					return nil, errors.New("invalid context")
+				}
+				u, exists := c.Get("user")
+				if !exists {
+					return nil, errors.New("unauthorized")
+				}
+				currentUser := u.(*models.User)
+				if !currentUser.IsAdmin {
+					return nil, errors.New("admin privilege required")
+				}
+
+				for k, v := range p.Args {
+					var strVal string
+					switch typedVal := v.(type) {
+					case bool:
+						strVal = strconv.FormatBool(typedVal)
+					case int:
+						strVal = strconv.Itoa(typedVal)
+					case float64:
+						strVal = strconv.Itoa(int(typedVal))
+					case string:
+						strVal = typedVal
+					default:
+						strVal = fmt.Sprintf("%v", v)
+					}
+					if err := database.UpdateSetting(k, strVal); err != nil {
+						return nil, fmt.Errorf("failed to update setting %s: %v", k, err)
+					}
+				}
+
+				return map[string]interface{}{
+					"site_name":                 database.GetSetting("site_name"),
+					"site_description":          database.GetSetting("site_description"),
+					"site_url":                  database.GetSetting("site_url"),
+					"tos_url":                   database.GetSetting("tos_url"),
+					"stop_register":             database.GetSettingBool("stop_register"),
+					"currency_unit":             database.GetSetting("currency_unit"),
+					"currency_symbol":           database.GetSetting("currency_symbol"),
+					"email_verify":              database.GetSettingBool("email_verify"),
+					"ban_gmail_alias":           database.GetSettingBool("ban_gmail_alias"),
+					"ip_register_limit":         database.GetSettingBool("ip_register_limit"),
+					"ip_register_limit_count":   database.GetSettingInt("ip_register_limit_count"),
+					"ip_register_limit_penalty": database.GetSettingInt("ip_register_limit_penalty"),
+					"theme_color":               database.GetSetting("theme_color"),
+					"home_background":           database.GetSetting("home_background"),
+					"uniproxy_token":            database.GetSetting("uniproxy_token"),
+					"node_pull_interval":        database.GetSettingInt("node_pull_interval"),
+					"node_push_interval":        database.GetSettingInt("node_push_interval"),
+					"smtp_host":                 database.GetSetting("smtp_host"),
+					"smtp_port":                 database.GetSettingInt("smtp_port"),
+					"smtp_encryption":           database.GetSetting("smtp_encryption"),
+					"smtp_username":             database.GetSetting("smtp_username"),
+					"smtp_password":             database.GetSetting("smtp_password"),
+					"smtp_from":                 database.GetSetting("smtp_from"),
+					"app_win":                   database.GetSetting("app_win"),
+					"app_macos":                 database.GetSetting("app_macos"),
+					"app_linux":                 database.GetSetting("app_linux"),
+					"app_android":               database.GetSetting("app_android"),
+					"app_ios":                   database.GetSetting("app_ios"),
+				}, nil
+			},
+		},
+		// Send test email (Admin only)
+		"sendTestEmail": &graphql.Field{
+			Type: graphql.Boolean,
+			Args: graphql.FieldConfigArgument{
+				"to": &graphql.ArgumentConfig{Type: graphql.NewNonNull(graphql.String)},
+			},
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				c, ok := p.Context.(*gin.Context)
+				if !ok {
+					return false, errors.New("invalid context")
+				}
+				u, exists := c.Get("user")
+				if !exists {
+					return false, errors.New("unauthorized")
+				}
+				currentUser := u.(*models.User)
+				if !currentUser.IsAdmin {
+					return false, errors.New("admin privilege required")
+				}
+
+				to := p.Args["to"].(string)
+				subject := "HY-Board SMTP 測試郵件"
+				body := `<h3>您好！</h3>
+<p>這是一封來自您的 <strong>HY-Board</strong> 代理管理面板的 SMTP 測試郵件。</p>
+<p>如果您收到這封郵件，代表您的郵件伺服器配置運作正常！</p>
+<br/>
+<p>此致，<br/>HY-Board 系統團隊</p>`
+
+				if err := database.SendEmail(to, subject, body); err != nil {
+					return false, err
+				}
+
+				return true, nil
 			},
 		},
 	},
