@@ -4,7 +4,7 @@ server:
 
 database:
   # Supported types: sqlite | mysql | postgres
-  type: "sqlite"
+  type: "postgres"
   
   # SQLite specific configuration
   sqlite:
@@ -23,9 +23,9 @@ database:
   postgres:
     host: "127.0.0.1"
     port: 5432
-    user: "postgres"
-    password: "password"
-    db_name: "hy_board"
+    user: "kanna"
+    password: "kannakanna"
+    db_name: "hyboard_test_db0"
     ssl_mode: "disable"
 
 auth:
